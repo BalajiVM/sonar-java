@@ -27,6 +27,7 @@ import com.google.common.collect.Lists;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.fest.assertions.Fail;
+import org.sonar.java.DefaultJavaFileScannerContext;
 import org.sonar.java.ast.JavaAstScanner;
 import org.sonar.java.ast.visitors.SubscriptionVisitor;
 import org.sonar.java.model.VisitorsBridge;
@@ -206,7 +207,7 @@ public class JavaCheckVerifier extends SubscriptionVisitor {
   public void scanFile(JavaFileScannerContext context) {
     expected.clear();
     super.scanFile(context);
-    VisitorsBridge.DefaultJavaFileScannerContext djfsc = (VisitorsBridge.DefaultJavaFileScannerContext) context;
+    DefaultJavaFileScannerContext djfsc = (DefaultJavaFileScannerContext) context;
     // leave file.
     checkIssues(djfsc.sourceFile);
     expected.clear();
