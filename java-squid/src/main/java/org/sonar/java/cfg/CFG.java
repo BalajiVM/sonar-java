@@ -22,6 +22,17 @@ package org.sonar.java.cfg;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nullable;
+import org.codehaus.plexus.util.StringOutputStream;
 import org.sonar.java.model.JavaTree;
 import org.sonar.plugins.java.api.semantic.Symbol;
 import org.sonar.plugins.java.api.tree.ArrayAccessExpressionTree;
@@ -63,16 +74,6 @@ import org.sonar.plugins.java.api.tree.UnaryExpressionTree;
 import org.sonar.plugins.java.api.tree.VariableTree;
 import org.sonar.plugins.java.api.tree.WhileStatementTree;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nullable;
-
-import java.io.PrintStream;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-
 public class CFG {
 
   private final Block exitBlock;
@@ -110,10 +111,10 @@ public class CFG {
   }
 
   public static class Block {
-    public final int id;
+    int id;
     private final List<Tree> elements = new ArrayList<>();
-    private final List<Block> successors = new ArrayList<>();
-    private final List<Block> predecessors = new ArrayList<>();
+    private final Set<Block> successors = new HashSet<>();
+    private final Set<Block> predecessors = new HashSet<>();
     private Tree terminator;
 
     public Block(int id) {
@@ -124,17 +125,51 @@ public class CFG {
       return Lists.reverse(elements);
     }
 
-    public List<Block> predecessors() {
+    public Set<Block> predecessors() {
       return predecessors;
     }
 
-    public List<Block> successors() {
+    public Set<Block> successors() {
       return successors;
     }
 
     @CheckForNull
     public Tree terminator() {
       return terminator;
+    }
+
+    public boolean isActive() {
+      return terminator == null && elements.isEmpty();
+    }
+
+    @Override
+    public String toString() {
+      StringOutputStream buffer = new StringOutputStream();
+      debugTo(new PrintStream(buffer));
+      return buffer.toString();
+    }
+
+    void debugTo(PrintStream out) {
+      if (id != 0) {
+        out.println("B" + id + ":");
+      } else {
+        out.println("B" + id + " (Exit) :");
+      }
+      int i = 0;
+      for (Tree tree : elements()) {
+        out.println("  " + i + ": " + syntaxNodeToDebugString(tree));
+        i++;
+      }
+      if (terminator != null) {
+        out.println("  T: " + syntaxNodeToDebugString(terminator));
+      }
+      if (!successors.isEmpty()) {
+        out.print("  Successors:");
+        for (Block successor : successors) {
+          out.print(" B" + successor.id);
+        }
+        out.println();
+      }
     }
   }
 
@@ -182,12 +217,42 @@ public class CFG {
       }
       b.successors.add(target);
     }
-
+    prune();
     for (Block b : blocks) {
       for (Block successor : b.successors) {
         successor.predecessors.add(b);
       }
     }
+  }
+
+  private void prune() {
+    List<Block> inactiveBlocks = new ArrayList<>();
+    boolean first = true;
+    for (Block block : blocks) {
+      if (!first && block.isActive()) {
+        inactiveBlocks.add(block);
+      }
+      first = false;
+    }
+    if (!inactiveBlocks.isEmpty()) {
+      removeInactiveBlocks(inactiveBlocks);
+      int id = 0;
+      for (Block block : blocks) {
+        block.id = id;
+        id += 1;
+      }
+    }
+  }
+
+  private void removeInactiveBlocks(List<Block> inactiveBlocks) {
+    for (Block inactiveBlock : inactiveBlocks) {
+      for (Block block : blocks) {
+        if (block.successors().remove(inactiveBlock)) {
+          block.successors().addAll(inactiveBlock.successors);
+        }
+      }
+    }
+    blocks.removeAll(inactiveBlocks);
   }
 
   private Block createBlock(Block successor) {
@@ -342,12 +407,12 @@ public class CFG {
       case NEW_ARRAY:
         buildNewArray((NewArrayTree) tree);
         break;
-      // Java 8 constructions : ignored for now.
+        // Java 8 constructions : ignored for now.
       case METHOD_REFERENCE:
         // assert can be ignored by VM so skip them for now.
       case ASSERT_STATEMENT:
         break;
-      // store declarations as complete blocks.
+        // store declarations as complete blocks.
       case EMPTY_STATEMENT:
       case CLASS:
       case ENUM:
@@ -770,7 +835,7 @@ public class CFG {
         // process RHS
         buildConditionalAnd((BinaryExpressionTree) syntaxNode, trueBlock, falseBlock);
         break;
-      // Skip syntactic sugar:
+        // Skip syntactic sugar:
       case PARENTHESIZED_EXPRESSION:
         buildCondition(((ParenthesizedTree) syntaxNode).expression(), trueBlock, falseBlock);
         break;
@@ -807,28 +872,16 @@ public class CFG {
 
   public void debugTo(PrintStream out) {
     for (Block block : Lists.reverse(blocks)) {
-      if (block.id != 0) {
-        out.println("B" + block.id + ":");
-      } else {
-        out.println("B" + block.id + " (Exit) :");
-      }
-      int i = 0;
-      for (Tree tree : block.elements()) {
-        out.println("  " + i + ": " + syntaxNodeToDebugString(tree));
-        i++;
-      }
-      if (block.terminator != null) {
-        out.println("  T: " + syntaxNodeToDebugString(block.terminator));
-      }
-      if (!block.successors.isEmpty()) {
-        out.print("  Successors:");
-        for (Block successor : block.successors) {
-          out.print(" B" + successor.id);
-        }
-        out.println();
-      }
+      block.debugTo(out);
     }
     out.println();
+  }
+
+  @Override
+  public String toString() {
+    StringOutputStream buffer = new StringOutputStream();
+    debugTo(new PrintStream(buffer));
+    return buffer.toString();
   }
 
   private static String syntaxNodeToDebugString(Tree syntaxNode) {
